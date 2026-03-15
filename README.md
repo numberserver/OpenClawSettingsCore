@@ -1,0 +1,2 @@
+# OpenClawSettingsCore
+在windows上快捷配置openclaw服务，并集成在相关应用中
