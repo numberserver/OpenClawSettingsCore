@@ -1,19 +1,18 @@
-using NLog; // 引入 NLog
-using NLog.Windows.Forms;
+using System;
+using System.Drawing;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
 using OpenClawSetting.Models;
 using OpenClawSetting.Services;
 using System;
-using System;
-using System.Diagnostics;
-using System.Drawing;
 using System.Drawing;
 using System.IO;
-using System.IO;
-using System.Threading;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Threading.Tasks;
-using System.Windows.Forms;
+using NLog; // 引入 NLog
+using NLog.Windows.Forms;
 
 namespace OpenClawSetting
 {
@@ -199,18 +198,16 @@ namespace OpenClawSetting
             var lblTip = new Label { Text = "提示：点击“启动服务”后，请前往飞书私聊机器人获取配对码。", AutoSize = true, Font = new Font("微软雅黑", 9, FontStyle.Bold), ForeColor = Color.FromArgb(0, 122, 204) };
             lblTip.Location = new Point(10, 10);
 
-            // 启动按钮
+            // === 修改：去掉 var，直接赋值给类变量 ===
             btnStart = new Button { Text = "▶ 启动服务", Location = new Point(10, 50), Width = 120, Height = 40 };
             btnStart.Click += BtnStart_Click;
 
-            // 停止按钮 (修改了文字和颜色，警示这是强制停止)
-            btnStop = new Button { Text = "⏹ 强制停止服务", Location = new Point(140, 50), Width = 120, Height = 40, Enabled = false, BackColor = Color.OrangeRed, ForeColor = Color.White };
+            btnStop = new Button { Text = "⏹ 停止服务", Location = new Point(140, 50), Width = 120, Height = 40, Enabled = false }; // 初始禁用
             btnStop.Click += BtnStop_Click;
 
-            // 配对区域 (保持不变)
-            var lblPair = new Label { Text = "配对码:", Location = new Point(280, 58), AutoSize = true };
-            var txtPair = new TextBox { Location = new Point(330, 55), Width = 100, Font = new Font("微软雅黑", 10) };
-            var btnApprove = new Button { Text = "✅ 批准配对", Location = new Point(440, 50), Width = 120, Height = 40 };
+            var lblPair = new Label { Text = "配对码:", Location = new Point(280, 58), AutoSize = true, Font = new Font("微软雅黑", 9) };
+            var txtPair = new TextBox { Location = new Point(330, 55), Width = 120, Font = new Font("微软雅黑", 10) };
+            var btnApprove = new Button { Text = "✅ 批准配对", Location = new Point(460, 50), Width = 120, Height = 40 };
             btnApprove.Click += (s, e) => ApprovePairing(txtPair.Text);
 
             logBox = new RichTextBox { Location = new Point(10, 100), Width = 840, Height = 450, ReadOnly = true, BackColor = Color.FromArgb(30, 30, 30), ForeColor = Color.LightGray, Font = new Font("Consolas", 10), BorderStyle = BorderStyle.None };
@@ -539,15 +536,20 @@ namespace OpenClawSetting
         private async void BtnStart_Click(object? sender, EventArgs e)
         {
             AppendLog("正在启动 OpenClaw Gateway...");
+            _runningCts = new CancellationTokenSource();
 
-            // 更新按钮状态
-            btnStart.Enabled = false;
-            btnStop.Enabled = true;
+            // === 修改按钮状态 ===
+            btnStart.Enabled = false; // 禁用启动
+            btnStop.Enabled = true;   // 启用停止
 
             try
             {
-                // 不需要 CancellationToken，让服务独立运行
-                await _systemService.ExecuteCommandAsync("openclaw gateway --allow-unconfigured", AppendLog, CancellationToken.None);
+                // 增加 --allow-unconfigured 参数
+                await _systemService.ExecuteCommandAsync("openclaw gateway --allow-unconfigured", AppendLog, _runningCts.Token);
+            }
+            catch (TaskCanceledException)
+            {
+                AppendLog("服务已停止。");
             }
             catch (Exception ex)
             {
@@ -555,118 +557,22 @@ namespace OpenClawSetting
             }
             finally
             {
-                // 只有在服务意外退出时才会走到这里
-                // 如果是正常运行的，这个 Task 会一直等待，不会走这里
+                // === 恢复按钮状态 ===
+                // 需要使用 Invoke 确保在主线程操作 UI
                 this.Invoke(new Action(() => {
-                    btnStart.Enabled = true;
-                    btnStop.Enabled = false;
+                    btnStart.Enabled = true; // 启用启动
+                    btnStop.Enabled = false; // 禁用停止
                 }));
             }
         }
 
-        private async void BtnStop_Click(object? sender, EventArgs e)
+        private void BtnStop_Click(object? sender, EventArgs e)
         {
-            const string targetPort = "18789"; // 固定端口
-
-            AppendLog($"正在查找端口 {targetPort} 占用情况...");
-            btnStop.Enabled = false; // 防止重复点击
-
-            try
+            if (_runningCts != null && !_runningCts.IsCancellationRequested)
             {
-                // 1. 执行 netstat 命令查找 PID
-                string netstatArgs = $"/c netstat -ano | findstr \"{targetPort}\"";
-                var (netstatOutput, netstatCode) = await RunCmdAndGetOutput(netstatArgs);
-
-                if (string.IsNullOrWhiteSpace(netstatOutput))
-                {
-                    AppendLog($"端口 {targetPort} 未被占用，服务可能已停止。");
-                    btnStart.Enabled = true;
-                    return;
-                }
-
-                // 2. 解析 PID
-                int pid = -1;
-                var lines = netstatOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-
-                foreach (var line in lines)
-                {
-                    if (line.Contains("LISTENING"))
-                    {
-                        var parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                        if (parts.Length > 0)
-                        {
-                            if (int.TryParse(parts[parts.Length - 1], out int foundPid))
-                            {
-                                pid = foundPid;
-                                AppendLog($"找到监听进程 PID: {pid}");
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                if (pid == -1)
-                {
-                    AppendLog("未能解析出 PID。");
-                    btnStop.Enabled = true;
-                    return;
-                }
-
-                // 3. 强制杀掉进程
-                AppendLog($"正在执行强制终止进程 {pid}...");
-                string killArgs = $"/c taskkill /PID {pid} /F";
-
-                // === 关键修改：接收退出代码 ===
-                var (killOutput, killExitCode) = await RunCmdAndGetOutput(killArgs);
-
-                // 输出日志（现在应该不再是乱码了，但也无需解析它）
-                AppendLog(killOutput.Trim());
-
-                // === 通过退出代码判断成功 (0 代表成功) ===
-                if (killExitCode == 0)
-                {
-                    AppendLog("服务已成功停止。");
-                    btnStart.Enabled = true; // 恢复启动按钮
-                }
-                else
-                {
-                    AppendLog($"停止失败 (Exit Code: {killExitCode})，可能需要管理员权限。");
-                    btnStop.Enabled = true; // 允许重试
-                }
-            }
-            catch (Exception ex)
-            {
-                AppendLog($"停止操作出错: {ex.Message}");
-                btnStop.Enabled = true;
-            }
-        }
-
-        // === 辅助方法：执行 CMD 命令并返回输出字符串 ===
-        private async Task<(string output, int exitCode)> RunCmdAndGetOutput(string arguments)
-        {
-            using (Process process = new Process())
-            {
-                process.StartInfo.FileName = "cmd.exe";
-                process.StartInfo.Arguments = arguments;
-                process.StartInfo.CreateNoWindow = true;
-                process.StartInfo.UseShellExecute = false;
-                process.StartInfo.RedirectStandardOutput = true;
-                process.StartInfo.RedirectStandardError = true;
-
-                // === 关键修复：使用系统默认编码 (GBK) 而不是 UTF-8，防止中文乱码 ===
-                // 这里的 Default 在中文 Windows 上就是 GBK (Code Page 936)
-                process.StartInfo.StandardOutputEncoding = System.Text.Encoding.Default;
-                process.StartInfo.StandardErrorEncoding = System.Text.Encoding.Default;
-
-                process.Start();
-
-                string output = await process.StandardOutput.ReadToEndAsync();
-                string error = await process.StandardError.ReadToEndAsync();
-
-                process.WaitForExit();
-
-                // 返回输出内容和退出代码
-                return (output + error, process.ExitCode);
+                AppendLog("正在发送停止信号...");
+                btnStop.Enabled = false; // 立即禁用按钮，防止重复点击
+                _runningCts.Cancel();
             }
         }
 
