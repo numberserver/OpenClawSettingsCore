@@ -6,3 +6,8 @@
 /OpenClawSetting/.vs
 /OpenClawSetting/obj/Debug/net8.0-windows/ref
 /OpenClawSetting/obj/Debug/net8.0-windows/refint
+/OpenClawSetting/bin/Release/net8.0-windows
+/OpenClawSetting/obj/Debug/net8.0-windows
+/OpenClawSetting/obj/publish/win-x64
+/OpenClawSetting/obj/Release/net8.0-windows
+/OpenClawSetting/obj
