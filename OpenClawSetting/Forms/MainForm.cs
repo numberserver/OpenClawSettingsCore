@@ -163,12 +163,13 @@ namespace OpenClawSetting
             btnAutoCreate.Click += (s, e) =>
             {
                 var wizard = new FeishuWizardFormV1();
-                if (wizard.ShowDialog() == DialogResult.OK)
-                {
-                    // 自动回填
-                    txtAppId.Text = wizard.ResultAppId;
-                    txtAppSecret.Text = wizard.ResultAppSecret;
-                }
+                wizard.Show();
+                //if (wizard.ShowDialog() == DialogResult.OK)
+                //{
+                //    // 自动回填
+                //    txtAppId.Text = wizard.ResultAppId;
+                //    txtAppSecret.Text = wizard.ResultAppSecret;
+                //}
             };
             pnlConfig.Controls.Add(btnAutoCreate);
         }
